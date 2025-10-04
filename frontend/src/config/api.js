@@ -7,6 +7,7 @@ export const API_ENDPOINTS = {
   WEATHER_LATEST: `${API_BASE_URL}/api/weather/latest/`,
   PREDICT_AQI: `${API_BASE_URL}/api/aqi/predict/`,
   GENERATE_REPORT: `${API_BASE_URL}/api/generate-report/`,
+  PREDICTION_FOLLOWUP: `${API_BASE_URL}/api/prediction-followup/`,
 };
 
 // Helper function to fetch data

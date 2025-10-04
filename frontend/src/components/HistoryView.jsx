@@ -86,6 +86,7 @@ function HistoryView() {
       const params = new URLSearchParams({
         start: Math.floor(startTimestamp).toString(),
         end: Math.floor(endTimestamp).toString(),
+        generate_summary: 'true',  // Request AI summary
       });
 
       if (userLocation.latitude && userLocation.longitude) {
@@ -95,6 +96,7 @@ function HistoryView() {
 
       const data = await fetchAPI(`${API_ENDPOINTS.PREDICT_AQI}?${params.toString()}`);
       console.log('API Response:', data);
+      console.log('AI Summary:', data.ai_summary);
       setHistoryData(data);
     } catch (err) {
       setError(err.message || 'Failed to fetch prediction data');
@@ -143,6 +145,7 @@ function HistoryView() {
 
           {historyData && !loading && (
             <>
+              <PredictionSummary aiSummary={historyData.ai_summary} />
               <HistoryChart data={historyData} />
               <HistoryStats data={historyData} />
             </>
@@ -203,6 +206,230 @@ function DateRangeSelector({ startDate, endDate, setStartDate, setEndDate, onFet
         <span className="button-icon">�</span>
         <span className="button-text">{loading ? 'Predicting...' : 'Predict AQI'}</span>
       </button>
+    </div>
+  );
+}
+
+function PredictionSummary({ aiSummary }) {
+  const [showChat, setShowChat] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatResponse, setChatResponse] = useState('');
+  const [selectedSection, setSelectedSection] = useState('');
+  
+  console.log('PredictionSummary received aiSummary:', aiSummary);
+  
+  if (!aiSummary) {
+    console.log('No aiSummary provided');
+    return null;
+  }
+  
+  if (aiSummary.error) {
+    console.log('AI Summary has error:', aiSummary.error);
+    return (
+      <div className="prediction-summary-card">
+        <div className="history-error">
+          <span className="error-icon">⚠️</span>
+          <p>Could not generate AI summary: {aiSummary.error}</p>
+        </div>
+      </div>
+    );
+  }
+  
+  const handleSectionClick = (section) => {
+    setSelectedSection(section);
+    setShowChat(true);
+    
+    let prompt = '';
+    if (section === 'farmers') {
+      prompt = 'What specific crops would you recommend for these air quality conditions?';
+    } else if (section === 'activities') {
+      prompt = 'What are the best times for outdoor activities during this period?';
+    } else if (section === 'health') {
+      prompt = 'What precautions should vulnerable groups take?';
+    }
+    setChatInput(prompt);
+  };
+  
+  const handleContinueChat = async () => {
+    if (!chatInput.trim()) return;
+    
+    setChatLoading(true);
+    setChatResponse('');
+    
+    try {
+      const requestBody = {
+        question: chatInput,
+        prediction_context: {
+          period: aiSummary.period,
+          avg_predicted_aqi: aiSummary.avg_predicted_aqi,
+          avg_pollutants: aiSummary.avg_pollutants,
+          summary: aiSummary.summary
+        }
+      };
+      
+      const response = await fetchAPI(API_ENDPOINTS.PREDICTION_FOLLOWUP, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (response.success && response.answer) {
+        setChatResponse(response.answer);
+      } else {
+        setChatResponse(response.error || 'Failed to get response');
+      }
+    } catch (error) {
+      setChatResponse(`Error: ${error.message}`);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+  
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleContinueChat();
+    }
+  };
+
+  const getAQILevel = (aqi) => {
+    if (!aqi) return { level: 'Unknown', color: '#6b7280' };
+    if (aqi <= 50) return { level: 'Good', color: '#10b981' };
+    if (aqi <= 100) return { level: 'Moderate', color: '#f59e0b' };
+    if (aqi <= 150) return { level: 'Unhealthy for Sensitive', color: '#f97316' };
+    if (aqi <= 200) return { level: 'Unhealthy', color: '#ef4444' };
+    if (aqi <= 300) return { level: 'Very Unhealthy', color: '#a855f7' };
+    return { level: 'Hazardous', color: '#7c2d12' };
+  };
+
+  const aqiInfo = getAQILevel(aiSummary.avg_predicted_aqi);
+
+  return (
+    <div className="prediction-summary-card">
+      <div className="prediction-summary-header">
+        <div className="summary-icon-wrapper">
+          <span className="summary-main-icon">🔮</span>
+          <h2 className="summary-card-title">AI-Powered Prediction Summary</h2>
+        </div>
+        <div className="prediction-period-badge">
+          <span className="period-icon">📅</span>
+          <span className="period-text">{aiSummary.period}</span>
+        </div>
+      </div>
+
+      {aiSummary.avg_predicted_aqi && (
+        <div className="predicted-aqi-banner" style={{ borderColor: aqiInfo.color }}>
+          <div className="aqi-banner-left">
+            <span className="aqi-label">Average Predicted AQI</span>
+            <div className="aqi-value-large" style={{ color: aqiInfo.color }}>
+              {aiSummary.avg_predicted_aqi.toFixed(1)}
+            </div>
+            <span className="aqi-level-badge" style={{ background: aqiInfo.color }}>
+              {aqiInfo.level}
+            </span>
+          </div>
+          
+          {aiSummary.avg_pollutants && (
+            <div className="aqi-banner-right">
+              <span className="pollutants-label">Average Pollutants</span>
+              <div className="pollutants-mini-grid">
+                {Object.entries(aiSummary.avg_pollutants).slice(0, 4).map(([pollutant, value]) => (
+                  <div key={pollutant} className="pollutant-mini-item">
+                    <span className="pollutant-mini-name">{pollutant}</span>
+                    <span className="pollutant-mini-value">{value.toFixed(1)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="prediction-summary-content">
+        <div className="summary-section-header">
+          <span className="summary-section-icon">📊</span>
+          <h3 className="summary-section-title">Long-Term Insights & Recommendations</h3>
+        </div>
+        <div className="summary-text-content">
+          <p className="summary-text-prediction">{aiSummary.summary}</p>
+        </div>
+      </div>
+
+      <div className="summary-action-items">
+        <div className="action-item" onClick={() => handleSectionClick('farmers')}>
+          <span className="action-icon">🌾</span>
+          <span className="action-label">For Farmers</span>
+          <span className="action-hint">Check crop recommendations</span>
+        </div>
+        <div className="action-item" onClick={() => handleSectionClick('activities')}>
+          <span className="action-icon">🏃</span>
+          <span className="action-label">For Activities</span>
+          <span className="action-hint">Plan outdoor events</span>
+        </div>
+        <div className="action-item" onClick={() => handleSectionClick('health')}>
+          <span className="action-icon">👨‍⚕️</span>
+          <span className="action-label">For Health</span>
+          <span className="action-hint">Follow advisory guidelines</span>
+        </div>
+      </div>
+      
+      {showChat && (
+        <div className="prediction-chat-section">
+          <div className="chat-header-prediction">
+            <span className="chat-icon-pred">💬</span>
+            <h4 className="chat-title-pred">Ask Follow-up Questions</h4>
+            <button 
+              className="chat-close-btn" 
+              onClick={() => {
+                setShowChat(false);
+                setChatResponse('');
+                setSelectedSection('');
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div className="chat-input-section">
+            <textarea
+              className="chat-input-prediction"
+              placeholder={`Ask anything about ${selectedSection === 'farmers' ? 'farming' : selectedSection === 'activities' ? 'outdoor activities' : 'health precautions'} during this period...`}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              rows="3"
+            />
+            <button
+              className="chat-submit-btn"
+              onClick={handleContinueChat}
+              disabled={chatLoading || !chatInput.trim()}
+            >
+              {chatLoading ? (
+                <>
+                  <span className="spinner-small"></span>
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <span>Ask AI</span>
+                  <span>→</span>
+                </>
+              )}
+            </button>
+          </div>
+          
+          {chatResponse && (
+            <div className="chat-response-prediction">
+              <div className="response-header">
+                <span className="response-icon">🤖</span>
+                <span className="response-label">AI Response</span>
+              </div>
+              <p className="response-text">{chatResponse}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

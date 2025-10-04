@@ -628,6 +628,76 @@ def predict_aqi(request):
         'count': len(results),
         'results': results,
     }
+    
+    # Generate AI summary if requested
+    generate_summary = request.query_params.get('generate_summary', '').lower() == 'true'
+    print(f"Generate summary requested: {generate_summary}, Results count: {len(results)}")
+    if generate_summary and results:
+        try:
+            # Calculate average predicted AQI (fallback to openweather_aqi if model predictions not available)
+            predicted_aqis = [
+                r.get('predicted_aqi') or r.get('openweather_aqi') 
+                for r in results 
+                if (r.get('predicted_aqi') is not None or r.get('openweather_aqi') is not None)
+            ]
+            avg_aqi = sum(predicted_aqis) / len(predicted_aqis) if predicted_aqis else None
+            print(f"Calculated average AQI: {avg_aqi}, from {len(predicted_aqis)} data points")
+            
+            # Calculate average pollutants
+            avg_pollutants = {}
+            for key in feature_keys:
+                values = [r['components'].get(key) for r in results if r['components'].get(key) is not None]
+                if values:
+                    avg_pollutants[key] = sum(values) / len(values)
+            
+            # Determine time period description
+            time_diff_hours = (end_ts - start_ts) / 3600
+            if time_diff_hours <= 24:
+                period_desc = "next 24 hours"
+            elif time_diff_hours <= 168:  # 7 days
+                period_desc = f"next {int(time_diff_hours / 24)} days"
+            else:
+                period_desc = f"next {int(time_diff_hours / 168)} weeks"
+            
+            # Generate AI summary for predictions
+            genai.configure(api_key=decouple.config("GEMINI_API_KEY", default=""))
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            
+            pollutant_info = ", ".join([f"{k}: {v:.2f} μg/m³" for k, v in avg_pollutants.items()])
+            
+            # Format AQI value properly
+            aqi_display = f"{avg_aqi:.1f}" if avg_aqi is not None else "N/A"
+            
+            prompt = f"""Based on air quality predictions for the {period_desc}:
+
+Location: Coordinates ({lat_val}, {lon_val})
+Time Period: {period_desc}
+Average Predicted AQI: {aqi_display}
+Average Pollutant Levels: {pollutant_info}
+
+Provide a comprehensive 5-6 sentence summary including:
+
+1. **Long-term Health Advisory**: Health recommendations for the predicted period, who should take precautions
+2. **Agricultural Planning**: Specific crop recommendations for farmers based on predicted air quality trends
+3. **Activity Planning**: Best times for outdoor activities during this period
+4. **Trend Analysis**: Whether air quality is expected to improve or worsen
+5. **Actionable Recommendations**: Practical steps people should take based on predictions
+
+Make it practical, forward-looking, and actionable for long-term planning."""
+
+            response = model.generate_content(prompt)
+            print(f"Generated AI summary successfully")
+            response_payload['ai_summary'] = {
+                'summary': response.text.strip(),
+                'period': period_desc,
+                'avg_predicted_aqi': avg_aqi,
+                'avg_pollutants': avg_pollutants
+            }
+        except Exception as e:
+            print(f"Error generating AI summary: {str(e)}")
+            response_payload['ai_summary'] = {
+                'error': f"Failed to generate summary: {str(e)}"
+            }
 
     # Validate/format output via serializer
     resp_ser = PredictAQIResponseSerializer(data=response_payload)
@@ -636,6 +706,99 @@ def predict_aqi(request):
         response_payload['warning'] = {'serializer_errors': resp_ser.errors}
         return Response(response_payload)
     return Response(resp_ser.data)
+
+@api_view(['POST'])
+def prediction_followup(request):
+    """
+    Handle follow-up questions specifically for prediction summaries.
+    
+    Expected POST body:
+    {
+        "question": "What crops are best for these conditions?",
+        "prediction_context": {
+            "period": "next 7 days",
+            "avg_predicted_aqi": 85,
+            "avg_pollutants": {...},
+            "summary": "Previous AI summary..."
+        }
+    }
+    """
+    try:
+        question = request.data.get('question', '').strip()
+        prediction_context = request.data.get('prediction_context', {})
+        
+        if not question:
+            return Response({
+                "success": False,
+                "error": "Question is required"
+            }, status=400)
+        
+        if not prediction_context:
+            return Response({
+                "success": False,
+                "error": "Prediction context is required"
+            }, status=400)
+        
+        # Extract context information
+        period = prediction_context.get('period', 'the predicted period')
+        avg_aqi = prediction_context.get('avg_predicted_aqi', 'N/A')
+        avg_pollutants = prediction_context.get('avg_pollutants', {})
+        previous_summary = prediction_context.get('summary', '')
+        
+        # Format pollutant information
+        pollutant_info = ", ".join([f"{k}: {v:.2f} μg/m³" for k, v in avg_pollutants.items()])
+        
+        # Format AQI display
+        aqi_display = f"{avg_aqi:.1f}" if isinstance(avg_aqi, (int, float)) else str(avg_aqi)
+        
+        # Initialize Gemini
+        genai.configure(api_key=decouple.config("GEMINI_API_KEY", default=""))
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Build comprehensive prompt with prediction context
+        prompt = f"""You are an air quality expert providing advice based on PREDICTED air quality data.
+
+PREDICTION CONTEXT:
+- Time Period: {period}
+- Average Predicted AQI: {aqi_display}
+- Average Pollutant Levels: {pollutant_info}
+
+PREVIOUS ANALYSIS:
+{previous_summary}
+
+USER QUESTION:
+{question}
+
+Provide a detailed, actionable 4-5 sentence response that:
+1. Directly answers the user's question
+2. References the specific predicted time period ({period})
+3. Considers the predicted AQI level ({aqi_display})
+4. Provides practical recommendations for planning ahead
+5. Is specific and actionable (avoid generic advice)
+
+Remember: This is PREDICTED data for future planning, not current conditions."""
+        
+        try:
+            response = model.generate_content(prompt)
+            answer_text = response.text.strip()
+            
+            return Response({
+                "success": True,
+                "answer": answer_text,
+                "question": question
+            })
+            
+        except Exception as ai_error:
+            return Response({
+                "success": False,
+                "error": f"AI processing error: {str(ai_error)}"
+            }, status=500)
+        
+    except Exception as e:
+        return Response({
+            "success": False,
+            "error": f"Failed to process follow-up: {str(e)}"
+        }, status=500)
 
 @api_view(['POST'])
 def generate_report(request):

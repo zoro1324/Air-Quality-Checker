@@ -40,6 +40,7 @@ class PredictAQIResponseSerializer(serializers.Serializer):
 	model = serializers.DictField()
 	count = serializers.IntegerField()
 	results = PredictAQIItemSerializer(many=True)
+	ai_summary = serializers.DictField(required=False)
 
 
 class CategoryDataSerializer(serializers.Serializer):
