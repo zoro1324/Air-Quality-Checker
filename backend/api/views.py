@@ -13,84 +13,114 @@ from urllib.error import URLError, HTTPError
 
 @api_view(['GET'])
 def latest_measurements(request):
-    OPENAQ_API = decouple.config("OPENAQ_API")
-    client = OpenAQ(OPENAQ_API)
+    # Use OpenWeather Air Pollution API instead of OpenAQ
+    api_key = decouple.config("OPENWEATHER_API", default=None) or decouple.config("OPENWHEATHER_API", default=None)
+    if not api_key:
+        return Response({"error": "OpenWeather API key missing. Set OPENWEATHER_API in backend/.env"}, status=500)
 
-    # Optional: override location via query param
-    loc_id_param = request.query_params.get('locations_id') or request.query_params.get('location_id')
+    # Accept lat/lon or city query; default to Chennai, IN
+    q_city = request.query_params.get('q') or request.query_params.get('city')
+    lat_param = request.query_params.get('lat')
+    lon_param = request.query_params.get('lon')
+    default_lat, default_lon = 13.0827, 80.2707
+
+    # Resolve coordinates
+    lat_val = None
+    lon_val = None
     try:
-        locations_id = int(loc_id_param) if loc_id_param is not None else 3409527
-    except (TypeError, ValueError):
-        return Response({"error": "locations_id must be an integer"}, status=400)
+        if lat_param is not None and lon_param is not None:
+            lat_val = float(lat_param)
+            lon_val = float(lon_param)
+        elif q_city:
+            # Geocode city to coordinates
+            geo_endpoint = 'https://api.openweathermap.org/geo/1.0/direct'
+            geo_params = {'q': q_city, 'limit': 1, 'appid': api_key}
+            geo_url = f"{geo_endpoint}?{urlencode(geo_params)}"
+            try:
+                req = Request(geo_url, headers={"User-Agent": "AirQualityChecker/1.0"})
+                with urlopen(req, timeout=10) as resp:
+                    geo_body = resp.read().decode('utf-8')
+                geo_data = json.loads(geo_body)
+            except HTTPError as e:
+                try:
+                    err_json = json.loads(e.read().decode('utf-8'))
+                except Exception:
+                    err_json = {"message": str(e)}
+                return Response({"error": "Geocoding failed", "details": err_json}, status=e.code if 400 <= e.code < 600 else 502)
+            except URLError as e:
+                return Response({"error": f"Failed to reach OpenWeather Geocoding: {e.reason}"}, status=502)
+            except Exception:
+                return Response({"error": "Invalid Geocoding response"}, status=502)
 
-    latest_data = client.locations.latest(locations_id=locations_id)
+            if not geo_data:
+                return Response({"error": "City not found"}, status=404)
+            lat_val = float(geo_data[0].get('lat'))
+            lon_val = float(geo_data[0].get('lon'))
+        else:
+            lat_val = default_lat
+            lon_val = default_lon
+    except ValueError:
+        return Response({"error": "lat and lon must be valid numbers"}, status=400)
 
-    def get_attr(obj, name, default=None):
-        if isinstance(obj, dict):
-            return obj.get(name, default)
-        return getattr(obj, name, default)
+    # Fetch air pollution data
+    air_endpoint = 'https://api.openweathermap.org/data/2.5/air_pollution'
+    air_params = {'lat': lat_val, 'lon': lon_val, 'appid': api_key}
+    air_url = f"{air_endpoint}?{urlencode(air_params)}"
 
-    def to_int(v):
+    try:
+        req = Request(air_url, headers={"User-Agent": "AirQualityChecker/1.0"})
+        with urlopen(req, timeout=10) as resp:
+            body = resp.read().decode('utf-8')
+    except HTTPError as e:
         try:
-            return None if v is None else int(v)
+            err_json = json.loads(e.read().decode('utf-8'))
         except Exception:
-            return None
+            err_json = {"message": str(e)}
+        return Response({"error": "OpenWeather Air Pollution API error", "details": err_json}, status=e.code if 400 <= e.code < 600 else 502)
+    except URLError as e:
+        return Response({"error": f"Failed to reach OpenWeather: {e.reason}"}, status=502)
 
-    def to_float(v):
-        try:
-            return None if v is None else float(v)
-        except Exception:
-            return None
+    try:
+        data = json.loads(body)
+    except Exception:
+        return Response({"error": "Invalid JSON from OpenWeather"}, status=502)
 
-    results_raw = getattr(latest_data, 'results', None)
-    if results_raw is None:
-        results_raw = latest_data if isinstance(latest_data, list) else []
+    lst = data.get('list') or []
+    first = lst[0] if lst else {}
+    main = first.get('main', {}) or {}
+    comps = first.get('components', {}) or {}
+    dt = first.get('dt')
 
-    serialized = []
-    for item in results_raw:
-        sensors_id = to_int(get_attr(item, 'sensors_id'))
+    # Map OpenWeather component keys to human-friendly pollutant names
+    key_name = [
+        ('co', 'CO'),
+        ('no', 'NO'),
+        ('no2', 'NO₂'),
+        ('o3', 'O₃'),
+        ('so2', 'SO₂'),
+        ('pm2_5', 'PM2.5'),
+        ('pm10', 'PM10'),
+        ('nh3', 'NH₃'),
+    ]
 
-        # Map sensors_id -> pollutant using if/elif conditions
-        pollutant = None
-        if sensors_id == 12238696:
-            pollutant = 'CO'
-        elif sensors_id == 12238697:
-            pollutant = 'SO₂'
-        elif sensors_id == 12238698:
-            pollutant = 'NO₂'
-        elif sensors_id == 12238699:
-            pollutant = 'PM10'
-        elif sensors_id == 12238700:
-            pollutant = 'PM2.5'
-        elif sensors_id == 12238701:
-            pollutant = 'O₃'
-        elif sensors_id == 12238702:
-            pollutant = 'NH₃'
-        elif sensors_id == 12238703:
-            pollutant = 'NO'
-        elif sensors_id == 12238704:
-            pollutant = 'NOx'
-
-        dt = get_attr(item, 'datetime')
-        coords = get_attr(item, 'coordinates')
-        lat = get_attr(coords, 'latitude') if coords is not None else None
-        lon = get_attr(coords, 'longitude') if coords is not None else None
-
-        serialized.append({
-            'sensors_id': sensors_id,
-            'pollutant': pollutant,
-            'value': to_float(get_attr(item, 'value')),
-            'datetime_utc': get_attr(dt, 'utc') if dt is not None else None,
-            'datetime_local': get_attr(dt, 'local') if dt is not None else None,
-            'latitude': to_float(lat),
-            'longitude': to_float(lon),
-            'locations_id': to_int(get_attr(item, 'locations_id')),
+    results = []
+    for key, label in key_name:
+        results.append({
+            'pollutant': label,
+            'key': key,
+            'value': comps.get(key),
+            'units': 'μg/m³',
         })
 
+    count = sum(1 for r in results if r['value'] is not None)
+
     return Response({
-        "message": "Latest measurements with pollutant mapping.",
-        "count": len(serialized),
-        "results": serialized,
+        'message': 'Latest air pollution from OpenWeather',
+        'coordinates': {'lat': lat_val, 'lon': lon_val},
+        'aqi': main.get('aqi'),
+        'timestamp_utc': dt,
+        'count': count,
+        'results': results,
     })
 
 
