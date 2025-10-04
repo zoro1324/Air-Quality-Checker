@@ -24,10 +24,10 @@ a:hover {
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
+  /* Use block flow so the app can take full width; centering is handled by .app-container */
   min-width: 320px;
   min-height: 100vh;
+  padding-top: 18px; /* small top spacing on desktop */
 }
 
 h1 {
