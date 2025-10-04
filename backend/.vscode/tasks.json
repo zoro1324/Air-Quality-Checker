@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Django check",
+			"type": "shell",
+			"command": "python manage.py check",
+			"args": [],
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"group": "build"
+		}
+	]
+}

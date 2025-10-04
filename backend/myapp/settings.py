@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.gis',
     'corsheaders',
     'rest_framework',
     'api',
@@ -75,13 +77,33 @@ WSGI_APPLICATION = 'myapp.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
+#
+# Configure PostGIS (PostgreSQL + PostGIS extension). Environment variables are
+# expected to be defined; fall back to sensible defaults/placeholders. If you
+# prefer to keep SQLite for local dev temporarily, set USE_SQLITE=True in env.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+USE_SQLITE = config('USE_SQLITE', default=False, cast=bool)
+
+if USE_SQLITE:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.contrib.gis.db.backends.postgis',
+            'NAME': config('DB_NAME', default='air_quality'),
+            'USER': config('DB_USER', default='postgres'),
+            'PASSWORD': config('DB_PASSWORD', default='postgres'),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+            # Optional: SSL or connection settings can be added here
+            # 'OPTIONS': {},
+        }
+    }
 
 
 # Password validation
