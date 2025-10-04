@@ -6,6 +6,7 @@ export const API_ENDPOINTS = {
   AQI_LATEST: `${API_BASE_URL}/api/aqi/latest/`,
   WEATHER_LATEST: `${API_BASE_URL}/api/weather/latest/`,
   PREDICT_AQI: `${API_BASE_URL}/api/aqi/predict/`,
+  GENERATE_REPORT: `${API_BASE_URL}/api/generate-report/`,
 };
 
 // Helper function to fetch data

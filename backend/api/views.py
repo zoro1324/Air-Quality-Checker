@@ -3,9 +3,12 @@ from rest_framework.response import Response
 from openaq import OpenAQ
 import decouple
 from .models import Location, Measurement
+import google.generativeai as genai
 from .serializers import (
     PredictAQIQuerySerializer,
     PredictAQIResponseSerializer,
+    GenerateReportRequestSerializer,
+    GenerateReportResponseSerializer,
 )
 from django.contrib.gis.geos import Point
 import json
@@ -16,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 import math
 from typing import Optional, Tuple, List
 import os
+
+
 
 # --- Optional TensorFlow model cache ---
 _aqi_model = None
@@ -631,3 +636,230 @@ def predict_aqi(request):
         response_payload['warning'] = {'serializer_errors': resp_ser.errors}
         return Response(response_payload)
     return Response(resp_ser.data)
+
+@api_view(['POST'])
+def generate_report(request):
+    """
+    Generate AI-powered summaries for air quality report categories with weather context.
+    
+    Expected POST body:
+    {
+        "categories": [
+            {
+                "category": "Agriculture Consultation",
+                "parameters": ["PM2.5", "PM10", "O3"],
+                "values": {
+                    "PM2.5": 35.5,
+                    "PM10": 78.2,
+                    "O3": 45.1
+                },
+                "aqi": 85,
+                "location": "Chennai, IN",
+                "weather": {
+                    "temperature": 23.1,
+                    "humidity": 86,
+                    "wind_speed": 0.99,
+                    "pressure": 1011,
+                    "description": "broken clouds"
+                }
+            }
+        ],
+        "follow_up_question": "Optional follow-up question for chat continuation"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "summary": "AI-generated summary...",
+        "category": "Category name",
+        "chat_session_id": "unique_id"
+    }
+    """
+    try:
+        # Validate request data
+        request_serializer = GenerateReportRequestSerializer(data=request.data)
+        if not request_serializer.is_valid():
+            return Response({
+                "success": False,
+                "error": "Invalid request data",
+                "details": request_serializer.errors
+            }, status=400)
+        
+        categories = request_serializer.validated_data.get('categories', [])
+        follow_up_question = request.data.get('follow_up_question', None)
+        previous_context = request.data.get('previous_context', None)
+        
+        # Initialize Gemini client with chat capability
+        genai.configure(api_key=decouple.config("GEMINI_API_KEY", default=""))
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Process only the first category (single summary at a time)
+        if not categories:
+            return Response({
+                "success": False,
+                "error": "No categories provided"
+            }, status=400)
+            
+        cat_data = categories[0]  # Take only first category
+        category = cat_data.get('category')
+        parameters = cat_data.get('parameters', [])
+        values = cat_data.get('values', {})
+        aqi = cat_data.get('aqi', 'N/A')
+        location = cat_data.get('location', 'Unknown location')
+        weather = cat_data.get('weather', {})
+        
+        if not category:
+            return Response({
+                "success": False,
+                "error": "Category name is required"
+            }, status=400)
+        
+        # Build context for AI including weather data
+        pollutant_info = []
+        for param in parameters:
+            value = values.get(param, 'N/A')
+            pollutant_info.append(f"{param}: {value} μg/m³")
+        
+        pollutant_text = ", ".join(pollutant_info) if pollutant_info else "No data available"
+        
+        # Build weather context
+        weather_info = []
+        if weather.get('temperature'):
+            weather_info.append(f"Temperature: {weather.get('temperature')}°C")
+        if weather.get('humidity'):
+            weather_info.append(f"Humidity: {weather.get('humidity')}%")
+        if weather.get('wind_speed'):
+            weather_info.append(f"Wind Speed: {weather.get('wind_speed')} m/s")
+        if weather.get('pressure'):
+            weather_info.append(f"Pressure: {weather.get('pressure')} hPa")
+        if weather.get('description'):
+            weather_info.append(f"Conditions: {weather.get('description')}")
+        
+        weather_text = ", ".join(weather_info) if weather_info else "Weather data not available"
+        
+        # Handle follow-up questions (chat continuation)
+        if follow_up_question and previous_context:
+            prompt = f"""Previous context:
+{previous_context}
+
+User's follow-up question: {follow_up_question}
+
+Provide a helpful, concise answer (2-3 sentences) based on the air quality and weather data."""
+        else:
+            # Create category-specific prompts with weather data
+            prompts = {
+                "Agriculture Consultation": f"""Based on the current environmental data for {location}:
+
+Air Quality:
+- AQI: {aqi}
+- Pollutants: {pollutant_text}
+
+Weather Conditions:
+- {weather_text}
+
+Provide a comprehensive 4-5 sentence summary for farmers including:
+1. Impact of air quality AND weather on crop health and photosynthesis
+2. How temperature, humidity, and wind affect pollutant dispersion
+3. Recommended farming practices considering both air quality and weather
+4. Best crops to plant in current conditions
+Keep it practical and actionable.""",
+
+                "Health Advisory": f"""Based on the current environmental data for {location}:
+
+Air Quality:
+- AQI: {aqi}
+- Pollutants: {pollutant_text}
+
+Weather Conditions:
+- {weather_text}
+
+Provide a comprehensive 4-5 sentence health advisory including:
+1. Who is most at risk considering both air quality and weather
+2. How temperature and humidity affect pollutant impacts on health
+3. Recommended precautions and activities to avoid
+4. Tips to reduce exposure in current weather conditions
+Keep it clear and medically sound.""",
+
+                "Air Quality Report": f"""Based on the current environmental data for {location}:
+
+Air Quality:
+- AQI: {aqi}
+- Pollutants: {pollutant_text}
+
+Weather Conditions:
+- {weather_text}
+
+Provide a comprehensive 4-5 sentence technical summary including:
+1. Overall air quality assessment in context of weather conditions
+2. Primary pollutants of concern and weather factors affecting them
+3. How temperature, wind, and humidity influence air quality
+4. Trend analysis and outlook considering weather patterns
+Keep it scientific but accessible.""",
+
+                "Emergency Services": f"""Based on the current environmental data for {location}:
+
+Air Quality:
+- AQI: {aqi}
+- Pollutants: {pollutant_text}
+
+Weather Conditions:
+- {weather_text}
+
+Provide a comprehensive 4-5 sentence emergency response summary including:
+1. Severity level considering both air quality and weather conditions
+2. How weather amplifies or reduces health risks
+3. When to seek medical help
+4. Emergency measures for vulnerable groups in current conditions
+Keep it urgent and actionable."""
+            }
+            
+            # Use default prompt if category not in predefined list
+            prompt = prompts.get(category, f"""Based on the current environmental data for {location}:
+
+Air Quality:
+- AQI: {aqi}
+- Pollutants: {pollutant_text}
+
+Weather Conditions:
+- {weather_text}
+
+Provide a comprehensive 4-5 sentence summary for the category "{category}" with actionable insights considering both air quality and weather conditions.""")
+        
+        try:
+            # Start or continue chat session
+            if previous_context:
+                # Continue existing chat
+                chat = model.start_chat()
+                response = chat.send_message(prompt)
+            else:
+                # New conversation
+                response = model.generate_content(prompt)
+            
+            summary_text = response.text.strip()
+            
+            # Generate session ID for chat continuation
+            import hashlib
+            import time
+            session_id = hashlib.md5(f"{category}{location}{time.time()}".encode()).hexdigest()
+            
+            response_data = {
+                "success": True,
+                "summary": summary_text,
+                "category": category,
+                "chat_session_id": session_id,
+                "context": f"Category: {category}\nLocation: {location}\nAQI: {aqi}\nPollutants: {pollutant_text}\nWeather: {weather_text}\n\nSummary: {summary_text}"
+            }
+            
+            return Response(response_data)
+            
+        except Exception as ai_error:
+            return Response({
+                "success": False,
+                "error": f"Unable to generate summary: {str(ai_error)}"
+            }, status=500)
+        
+    except Exception as e:
+        return Response({
+            "success": False,
+            "error": f"Failed to generate report: {str(e)}"
+        }, status=500)

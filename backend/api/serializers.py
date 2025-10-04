@@ -40,3 +40,37 @@ class PredictAQIResponseSerializer(serializers.Serializer):
 	model = serializers.DictField()
 	count = serializers.IntegerField()
 	results = PredictAQIItemSerializer(many=True)
+
+
+class CategoryDataSerializer(serializers.Serializer):
+	category = serializers.CharField(required=True, max_length=200)
+	parameters = serializers.ListField(
+		child=serializers.CharField(),
+		required=False,
+		allow_empty=True
+	)
+	values = serializers.DictField(
+		child=serializers.FloatField(allow_null=True),
+		required=False,
+		allow_empty=True
+	)
+	aqi = serializers.IntegerField(required=False, allow_null=True)
+	location = serializers.CharField(required=False, max_length=200, allow_blank=True)
+	weather = serializers.DictField(required=False, allow_empty=True)
+
+
+class GenerateReportRequestSerializer(serializers.Serializer):
+	categories = serializers.ListField(
+		child=CategoryDataSerializer(),
+		required=True,
+		allow_empty=False
+	)
+
+
+class GenerateReportResponseSerializer(serializers.Serializer):
+	success = serializers.BooleanField()
+	summary = serializers.CharField(required=False)
+	category = serializers.CharField(required=False)
+	chat_session_id = serializers.CharField(required=False)
+	context = serializers.CharField(required=False)
+	error = serializers.CharField(required=False)

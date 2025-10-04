@@ -289,37 +289,41 @@ function WeatherCard({ weatherData, loading, error }) {
   );
 }
 
-function ActionButtons() {
+function ActionButtons({ aqiData, weatherData, onGenerateSummary, loadingCategory }) {
   const actions = [
     {
       title: "Agriculture Consultation",
       description: "Expert advice on crop selection and farming practices",
       icon: "🌾",
       color: "#10b981",
-      action: () => alert("Agriculture consultation feature coming soon!")
     },
     {
       title: "Health Advisory",
       description: "Personalized health recommendations based on air quality",
       icon: "🏥",
       color: "#3b82f6",
-      action: () => alert("Health advisory feature coming soon!")
     },
     {
       title: "Air Quality Report",
       description: "Download detailed air quality analysis report",
       icon: "📊",
       color: "#f59e0b",
-      action: () => alert("Report generation feature coming soon!")
     },
     {
       title: "Emergency Services",
       description: "Quick access to emergency contacts and services",
       icon: "🚨",
       color: "#ef4444",
-      action: () => alert("Emergency services directory coming soon!")
     },
   ];
+
+  const handleActionClick = async (category) => {
+    if (!aqiData || !weatherData) {
+      alert('Please wait for air quality and weather data to load.');
+      return;
+    }
+    await onGenerateSummary(category);
+  };
 
   return (
     <div className="action-buttons-section">
@@ -329,17 +333,103 @@ function ActionButtons() {
           <button 
             key={idx} 
             className="action-button"
-            onClick={action.action}
+            onClick={() => handleActionClick(action.title)}
+            disabled={loadingCategory === action.title}
             style={{ '--action-color': action.color }}
           >
-            <div className="action-icon">{action.icon}</div>
+            <div className="action-icon">
+              {loadingCategory === action.title ? '⏳' : action.icon}
+            </div>
             <div className="action-content">
               <h3 className="action-title">{action.title}</h3>
-              <p className="action-description">{action.description}</p>
+              <p className="action-description">
+                {loadingCategory === action.title ? 'Generating...' : action.description}
+              </p>
             </div>
             <div className="action-arrow">→</div>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function SummaryDisplay({ summary, category, onContinueChat }) {
+  const [chatInput, setChatInput] = useState('');
+  const [showChatInput, setShowChatInput] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+
+  if (!summary || !category) {
+    return null;
+  }
+
+  const categoryIcons = {
+    "Agriculture Consultation": "🌾",
+    "Health Advisory": "🏥",
+    "Air Quality Report": "📊",
+    "Emergency Services": "🚨"
+  };
+
+  const categoryColors = {
+    "Agriculture Consultation": "#10b981",
+    "Health Advisory": "#3b82f6",
+    "Air Quality Report": "#f59e0b",
+    "Emergency Services": "#ef4444"
+  };
+
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    
+    setChatLoading(true);
+    await onContinueChat(chatInput);
+    setChatInput('');
+    setChatLoading(false);
+  };
+
+  return (
+    <div className="summaries-section">
+      <h2 className="section-title-main">Generated Summary</h2>
+      <div className="summary-single">
+        <div className="summary-card" style={{ borderColor: categoryColors[category] || '#6b7280' }}>
+          <div className="summary-header" style={{ background: categoryColors[category] || '#6b7280' }}>
+            <span className="summary-icon">{categoryIcons[category] || '📄'}</span>
+            <h3 className="summary-title">{category}</h3>
+          </div>
+          <div className="summary-content">
+            <p className="summary-text">{summary}</p>
+          </div>
+          <div className="summary-actions">
+            <button 
+              className="continue-chat-btn"
+              onClick={() => setShowChatInput(!showChatInput)}
+            >
+              💬 Continue Chatting
+            </button>
+          </div>
+          
+          {showChatInput && (
+            <div className="chat-input-section">
+              <form onSubmit={handleChatSubmit}>
+                <input
+                  type="text"
+                  className="chat-input"
+                  placeholder="Ask a follow-up question..."
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  disabled={chatLoading}
+                />
+                <button 
+                  type="submit" 
+                  className="chat-submit-btn"
+                  disabled={chatLoading || !chatInput.trim()}
+                >
+                  {chatLoading ? '⏳ Sending...' : '📤 Send'}
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -436,6 +526,12 @@ function TodayView() {
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [aqiError, setAqiError] = useState(null);
   const [weatherError, setWeatherError] = useState(null);
+  
+  // State for single summary with chat
+  const [summary, setSummary] = useState(null);
+  const [currentCategory, setCurrentCategory] = useState(null);
+  const [chatContext, setChatContext] = useState(null);
+  const [loadingCategory, setLoadingCategory] = useState(null);
 
   // Update theme
   useEffect(() => {
@@ -513,6 +609,149 @@ function TodayView() {
     }
   }, [fetchAQIData, fetchWeatherData, userLocation.loading]);
 
+  // Generate summary for a specific category
+  const handleGenerateSummary = React.useCallback(async (category) => {
+    setLoadingCategory(category);
+    
+    try {
+      // Extract pollutant data
+      const pollutants = aqiData?.results || [];
+      const parameters = pollutants
+        .filter(p => p.value !== null && p.value !== undefined)
+        .map(p => p.pollutant);
+      
+      const values = {};
+      pollutants.forEach(p => {
+        if (p.value !== null && p.value !== undefined) {
+          values[p.pollutant] = p.value;
+        }
+      });
+      
+      // Get location info
+      const location = weatherData?.result?.location;
+      const locationName = location?.name && location?.country 
+        ? `${location.name}, ${location.country}` 
+        : 'Unknown location';
+      
+      // Get weather data
+      const weather = weatherData?.result || {};
+      const weatherInfo = {
+        temperature: weather.temperature?.value,
+        humidity: weather.atmosphere?.humidity_pct,
+        wind_speed: weather.wind?.speed,
+        pressure: weather.atmosphere?.pressure_hpa,
+        description: weather.conditions?.description
+      };
+      
+      // Make API call
+      const response = await fetch(API_ENDPOINTS.GENERATE_REPORT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          categories: [{
+            category: category,
+            parameters: parameters,
+            values: values,
+            aqi: aqiData?.aqi || 0,
+            location: locationName,
+            weather: weatherInfo
+          }]
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.summary) {
+        // Replace the current summary with new one
+        setSummary(data.summary);
+        setCurrentCategory(data.category || category);
+        setChatContext(data.context);
+      } else {
+        throw new Error(data.error || 'Failed to generate summary');
+      }
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      alert(`Failed to generate ${category}: ${error.message}`);
+    } finally {
+      setLoadingCategory(null);
+    }
+  }, [aqiData, weatherData]);
+
+  // Handle follow-up chat questions
+  const handleContinueChat = React.useCallback(async (question) => {
+    try {
+      // Extract current data
+      const pollutants = aqiData?.results || [];
+      const parameters = pollutants
+        .filter(p => p.value !== null && p.value !== undefined)
+        .map(p => p.pollutant);
+      
+      const values = {};
+      pollutants.forEach(p => {
+        if (p.value !== null && p.value !== undefined) {
+          values[p.pollutant] = p.value;
+        }
+      });
+      
+      const location = weatherData?.result?.location;
+      const locationName = location?.name && location?.country 
+        ? `${location.name}, ${location.country}` 
+        : 'Unknown location';
+      
+      const weather = weatherData?.result || {};
+      const weatherInfo = {
+        temperature: weather.temperature?.value,
+        humidity: weather.atmosphere?.humidity_pct,
+        wind_speed: weather.wind?.speed,
+        pressure: weather.atmosphere?.pressure_hpa,
+        description: weather.conditions?.description
+      };
+      
+      // Make API call with follow-up question
+      const response = await fetch(API_ENDPOINTS.GENERATE_REPORT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          categories: [{
+            category: currentCategory,
+            parameters: parameters,
+            values: values,
+            aqi: aqiData?.aqi || 0,
+            location: locationName,
+            weather: weatherInfo
+          }],
+          follow_up_question: question,
+          previous_context: chatContext
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.summary) {
+        // Update summary with AI response
+        setSummary(data.summary);
+        setChatContext(data.context);
+      } else {
+        throw new Error(data.error || 'Failed to get response');
+      }
+    } catch (error) {
+      console.error('Error in chat:', error);
+      alert(`Failed to get response: ${error.message}`);
+    }
+  }, [aqiData, weatherData, currentCategory, chatContext]);
+
   const themeValue = { isDarkMode, toggleTheme };
 
   return (
@@ -529,7 +768,18 @@ function TodayView() {
             <WeatherCard weatherData={weatherData} loading={weatherLoading} error={weatherError} />
           </div>
           
-          <ActionButtons />
+          <ActionButtons 
+            aqiData={aqiData}
+            weatherData={weatherData}
+            onGenerateSummary={handleGenerateSummary}
+            loadingCategory={loadingCategory}
+          />
+          
+          <SummaryDisplay 
+            summary={summary} 
+            category={currentCategory}
+            onContinueChat={handleContinueChat}
+          />
         </div>
       </div>
     </ThemeContext.Provider>

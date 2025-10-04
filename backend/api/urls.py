@@ -8,6 +8,7 @@ urlpatterns = [
     path('aqi/insert/', views.instert_data, name='insert_data'),
     path('weather/latest/', views.latest_weather, name='latest_weather'),
     path('aqi/predict/', views.predict_aqi, name='predict_aqi'),
+    path('generate-report/', views.generate_report, name='generate_report'),
 ]
 
 # myapp.urls +/+ api.urls
