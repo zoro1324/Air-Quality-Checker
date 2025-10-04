@@ -4,6 +4,10 @@ from openaq import OpenAQ
 import decouple
 from .models import Location, Measurement
 from django.contrib.gis.geos import Point
+import json
+from urllib.request import urlopen, Request
+from urllib.parse import urlencode
+from urllib.error import URLError, HTTPError
 
 # Create your views here.
 
@@ -166,3 +170,122 @@ def instert_data(request):
         page += 1
 
     return Response({"message": f"Inserted/Updated {inserted_count} locations successfully"})
+
+@api_view(['GET'])
+def latest_weather(request):
+    # Get API key from env; accept either OPENWEATHER_API (correct) or OPENWHEATHER_API (legacy)
+    api_key = decouple.config("OPENWEATHER_API", default=None)
+    if not api_key:
+        # Backward-compat: typo variant in .env
+        api_key = decouple.config("OPENWHEATHER_API", default=None)
+
+    if not api_key:
+        return Response({
+            "error": "OpenWeather API key missing. Set OPENWEATHER_API in backend/.env",
+        }, status=500)
+
+    # Parse query params
+    q_city = request.query_params.get('q') or request.query_params.get('city')
+    lat = request.query_params.get('lat')
+    lon = request.query_params.get('lon')
+    units = request.query_params.get('units', 'metric')
+
+    # Default to Chennai, IN if no coords/city provided
+    default_lat, default_lon = 13.0827, 80.2707
+
+    params = {
+        'appid': api_key,
+        'units': units if units in ('standard', 'metric', 'imperial') else 'metric',
+    }
+
+    endpoint = 'https://api.openweathermap.org/data/2.5/weather'
+
+    # Build request params based on precedence: lat/lon > city > default
+    try:
+        if lat is not None and lon is not None:
+            params['lat'] = float(lat)
+            params['lon'] = float(lon)
+        elif q_city:
+            params['q'] = q_city
+        else:
+            params['lat'] = default_lat
+            params['lon'] = default_lon
+    except ValueError:
+        return Response({"error": "lat and lon must be valid numbers"}, status=400)
+
+    url = f"{endpoint}?{urlencode(params)}"
+    try:
+        req = Request(url, headers={"User-Agent": "AirQualityChecker/1.0"})
+        with urlopen(req, timeout=10) as resp:
+            status = getattr(resp, 'status', 200)
+            body = resp.read().decode('utf-8')
+    except HTTPError as e:
+        # Attempt to read error body json
+        try:
+            err_body = e.read().decode('utf-8')
+            err_json = json.loads(err_body)
+        except Exception:
+            err_json = {"message": str(e)}
+        return Response({
+            "error": "OpenWeather API error",
+            "status_code": e.code,
+            "details": err_json,
+        }, status=e.code if 400 <= e.code < 600 else 502)
+    except URLError as e:
+        return Response({"error": f"Failed to reach OpenWeather: {e.reason}"}, status=502)
+
+    try:
+        data = json.loads(body)
+    except Exception:
+        return Response({"error": "Invalid JSON from OpenWeather"}, status=502)
+
+    # Curate a compact, frontend-friendly payload
+    coord = data.get('coord', {}) or {}
+    main = data.get('main', {}) or {}
+    wind = data.get('wind', {}) or {}
+    sys = data.get('sys', {}) or {}
+    weather_list = data.get('weather') or []
+    weather0 = weather_list[0] if weather_list else {}
+
+    curated = {
+        'location': {
+            'name': data.get('name'),
+            'country': sys.get('country'),
+        },
+        'coordinates': {
+            'lat': coord.get('lat'),
+            'lon': coord.get('lon'),
+        },
+        'conditions': {
+            'main': weather0.get('main'),
+            'description': weather0.get('description'),
+            'icon': weather0.get('icon'),
+        },
+        'temperature': {
+            'value': main.get('temp'),
+            'feels_like': main.get('feels_like'),
+            'min': main.get('temp_min'),
+            'max': main.get('temp_max'),
+            'units': params['units'],
+        },
+        'atmosphere': {
+            'pressure_hpa': main.get('pressure'),
+            'humidity_pct': main.get('humidity'),
+        },
+        'wind': {
+            'speed': wind.get('speed'),
+            'deg': wind.get('deg'),
+            'gust': wind.get('gust'),
+        },
+        'visibility_m': data.get('visibility'),
+        'timestamp_utc': data.get('dt'),
+        'sunrise_utc': sys.get('sunrise'),
+        'sunset_utc': sys.get('sunset'),
+        'raw': data,  # Keep raw for debugging/extended use; remove if not needed
+    }
+
+    return Response({
+        "message": "Latest current weather from OpenWeather",
+        "query": {k: v for k, v in params.items() if k != 'appid'},
+        "result": curated,
+    })

@@ -6,6 +6,7 @@ from . import views
 urlpatterns = [
     path('aqi/latest/', views.latest_measurements, name='latest_measurements'),
     path('aqi/insert/', views.instert_data, name='insert_data'),
+    path('weather/latest/', views.latest_weather, name='latest_weather'),
 ]
 
 # myapp.urls +/+ api.urls
