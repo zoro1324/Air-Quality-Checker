@@ -4,6 +4,20 @@
 
 Backend is Django 5 with a REST API, frontend is Vite + React. The backend now supports PostGIS for geospatial queries using GeoDjango.
 
+## Team
+
+Our team consists of 6 members working on different aspects of the project:
+
+### Backend Team
+- **Naveemkumar** - Backend Developer
+- **Sarah Jeslyn** - Backend Developer
+- **Parthiv** - Backend Developer
+
+### Frontend Team
+- **Nisha** - Frontend Developer
+- **Ramvignesh** - Frontend Developer
+- **Lakshya** - Frontend Developer
+
 ## Backend database: PostGIS setup
 
 You can run with SQLite temporarily by setting `USE_SQLITE=True` in `backend/.env`, but to use geospatial features switch to PostGIS.
