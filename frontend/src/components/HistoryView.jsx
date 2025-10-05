@@ -16,6 +16,8 @@ import {
 import { API_ENDPOINTS, fetchAPI } from '../config/api.js';
 import Navbar from './Navbar.jsx';
 import useGeolocation from '../hooks/useGeolocation.js';
+import TextToSpeech from './TextToSpeech.jsx';
+import VoiceInput from './VoiceInput.jsx';
 
 ChartJS.register(
   CategoryScale,
@@ -236,9 +238,46 @@ function PredictionSummary({ aiSummary }) {
     );
   }
   
+  // Suggestion prompts based on selected section
+  const getSuggestions = (section) => {
+    const suggestions = {
+      farmers: [
+        "Which crops are most resistant to air pollution?",
+        "What's the best time of day for fieldwork during this period?",
+        "Should I delay harvesting based on these conditions?",
+        "What irrigation schedule works best with this air quality?",
+        "Are there any organic farming practices for polluted air?"
+      ],
+      activities: [
+        "Is it safe for morning jogging during this period?",
+        "What indoor alternatives do you recommend?",
+        "Can children play outdoor sports safely?",
+        "What's the best time for outdoor photography?",
+        "Should we reschedule our outdoor event?"
+      ],
+      health: [
+        "What masks are most effective for these conditions?",
+        "Should asthma patients stay indoors?",
+        "Are air purifiers necessary at home?",
+        "What symptoms should we watch for?",
+        "Can pregnant women go for walks?"
+      ]
+    };
+    return suggestions[section] || [];
+  };
+  
+  const handleSuggestionClick = (suggestion) => {
+    setChatInput(suggestion);
+    // Automatically submit the suggestion
+    setTimeout(() => {
+      handleContinueChat(suggestion);
+    }, 100);
+  };
+  
   const handleSectionClick = (section) => {
     setSelectedSection(section);
     setShowChat(true);
+    setChatResponse(''); // Clear previous response
     
     let prompt = '';
     if (section === 'farmers') {
@@ -251,15 +290,16 @@ function PredictionSummary({ aiSummary }) {
     setChatInput(prompt);
   };
   
-  const handleContinueChat = async () => {
-    if (!chatInput.trim()) return;
+  const handleContinueChat = async (customQuestion = null) => {
+    const question = customQuestion || chatInput;
+    if (!question.trim()) return;
     
     setChatLoading(true);
     setChatResponse('');
     
     try {
       const requestBody = {
-        question: chatInput,
+        question: question,
         prediction_context: {
           period: aiSummary.period,
           avg_predicted_aqi: aiSummary.avg_predicted_aqi,
@@ -354,6 +394,11 @@ function PredictionSummary({ aiSummary }) {
         <div className="summary-text-content">
           <p className="summary-text-prediction">{aiSummary.summary}</p>
         </div>
+        
+        {/* Text-to-Speech Controls for Summary */}
+        <div className="summary-tts">
+          <TextToSpeech text={aiSummary.summary} />
+        </div>
       </div>
 
       <div className="summary-action-items">
@@ -385,24 +430,76 @@ function PredictionSummary({ aiSummary }) {
                 setShowChat(false);
                 setChatResponse('');
                 setSelectedSection('');
+                setChatInput('');
               }}
             >
               ✕
             </button>
           </div>
           
+          {/* Suggestion Pills with TTS */}
+          {!chatResponse && selectedSection && (
+            <div className="suggestion-pills-container">
+              <div className="suggestions-header">
+                <p className="suggestions-label">💡 Quick Questions:</p>
+                <div className="suggestions-tts-all">
+                  <TextToSpeech 
+                    text={`Quick questions: ${getSuggestions(selectedSection).join('. ')}`}
+                  />
+                </div>
+              </div>
+              <div className="suggestion-pills">
+                {getSuggestions(selectedSection).map((suggestion, index) => (
+                  <div key={index} className="suggestion-pill-wrapper">
+                    <button
+                      className="suggestion-pill"
+                      onClick={() => handleSuggestionClick(suggestion)}
+                      disabled={chatLoading}
+                    >
+                      {suggestion}
+                    </button>
+                    <button
+                      className="suggestion-pill-tts"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Create a temporary TTS instance for this suggestion
+                        const utterance = new SpeechSynthesisUtterance(suggestion);
+                        window.speechSynthesis.speak(utterance);
+                      }}
+                      disabled={chatLoading}
+                      aria-label={`Read: ${suggestion}`}
+                      title="Read this question aloud"
+                    >
+                      🔊
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
           <div className="chat-input-section">
-            <textarea
-              className="chat-input-prediction"
-              placeholder={`Ask anything about ${selectedSection === 'farmers' ? 'farming' : selectedSection === 'activities' ? 'outdoor activities' : 'health precautions'} during this period...`}
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              rows="3"
-            />
+            <div className="chat-input-with-voice">
+              <textarea
+                className="chat-input-prediction"
+                placeholder={`Ask anything about ${selectedSection === 'farmers' ? 'farming' : selectedSection === 'activities' ? 'outdoor activities' : 'health precautions'} during this period...`}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                rows="3"
+              />
+              <div className="voice-input-wrapper">
+                <VoiceInput 
+                  onTranscript={(text) => {
+                    // Append the voice transcript to existing text
+                    setChatInput(prev => prev + text);
+                  }}
+                />
+              </div>
+            </div>
             <button
               className="chat-submit-btn"
-              onClick={handleContinueChat}
+              onClick={() => handleContinueChat()}
               disabled={chatLoading || !chatInput.trim()}
             >
               {chatLoading ? (
@@ -426,6 +523,23 @@ function PredictionSummary({ aiSummary }) {
                 <span className="response-label">AI Response</span>
               </div>
               <p className="response-text">{chatResponse}</p>
+              
+              {/* Text-to-Speech for Chat Response */}
+              <div className="response-tts">
+                <TextToSpeech text={chatResponse} />
+              </div>
+              
+              {/* Ask Another Question Button */}
+              <button 
+                className="ask-another-btn"
+                onClick={() => {
+                  setChatResponse('');
+                  setChatInput('');
+                }}
+              >
+                <span>💬</span>
+                <span>Ask Another Question</span>
+              </button>
             </div>
           )}
         </div>

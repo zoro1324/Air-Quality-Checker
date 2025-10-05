@@ -6,6 +6,7 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend } from "chart.js";
 import { API_ENDPOINTS, fetchAPI } from "../config/api.js";
 import useGeolocation from "../hooks/useGeolocation.js";
 import Navbar from "./Navbar.jsx";
+import TextToSpeech from "./TextToSpeech.jsx";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -358,6 +359,7 @@ function SummaryDisplay({ summary, category, onContinueChat }) {
   const [chatInput, setChatInput] = useState('');
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatHistory, setChatHistory] = useState([]);
 
   if (!summary || !category) {
     return null;
@@ -381,9 +383,21 @@ function SummaryDisplay({ summary, category, onContinueChat }) {
     e.preventDefault();
     if (!chatInput.trim()) return;
     
+    const userQuestion = chatInput;
     setChatLoading(true);
-    await onContinueChat(chatInput);
+    
+    // Add user question to chat history
+    setChatHistory(prev => [...prev, { type: 'question', text: userQuestion }]);
     setChatInput('');
+    
+    // Get AI response
+    const response = await onContinueChat(userQuestion);
+    
+    // Add AI response to chat history if available
+    if (response) {
+      setChatHistory(prev => [...prev, { type: 'answer', text: response }]);
+    }
+    
     setChatLoading(false);
   };
 
@@ -399,6 +413,12 @@ function SummaryDisplay({ summary, category, onContinueChat }) {
           <div className="summary-content">
             <p className="summary-text">{summary}</p>
           </div>
+          
+          {/* Text-to-Speech Controls */}
+          <div className="summary-tts">
+            <TextToSpeech text={summary} />
+          </div>
+          
           <div className="summary-actions">
             <button 
               className="continue-chat-btn"
@@ -410,6 +430,36 @@ function SummaryDisplay({ summary, category, onContinueChat }) {
           
           {showChatInput && (
             <div className="chat-input-section">
+              {/* Chat History */}
+              {chatHistory.length > 0 && (
+                <div className="chat-history">
+                  {chatHistory.map((message, index) => (
+                    <div 
+                      key={index} 
+                      className={`chat-message ${message.type === 'question' ? 'user-question' : 'ai-answer'}`}
+                    >
+                      <div className="message-header">
+                        <span className="message-icon">
+                          {message.type === 'question' ? '❓' : '🤖'}
+                        </span>
+                        <span className="message-label">
+                          {message.type === 'question' ? 'You asked:' : 'AI Response:'}
+                        </span>
+                      </div>
+                      <p className="message-text">{message.text}</p>
+                      
+                      {/* Add TTS for AI responses */}
+                      {message.type === 'answer' && (
+                        <div className="message-tts">
+                          <TextToSpeech text={message.text} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Chat Input Form */}
               <form onSubmit={handleChatSubmit}>
                 <input
                   type="text"
@@ -740,15 +790,17 @@ function TodayView() {
       const data = await response.json();
       
       if (data.success && data.summary) {
-        // Update summary with AI response
-        setSummary(data.summary);
+        // Update context for future questions
         setChatContext(data.context);
+        // Return the response for chat history
+        return data.summary;
       } else {
         throw new Error(data.error || 'Failed to get response');
       }
     } catch (error) {
       console.error('Error in chat:', error);
       alert(`Failed to get response: ${error.message}`);
+      return null;
     }
   }, [aqiData, weatherData, currentCategory, chatContext]);
 
