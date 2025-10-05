@@ -7,6 +7,7 @@ import { API_ENDPOINTS, fetchAPI } from "../config/api.js";
 import useGeolocation from "../hooks/useGeolocation.js";
 import Navbar from "./Navbar.jsx";
 import TextToSpeech from "./TextToSpeech.jsx";
+import VoiceInput from "./VoiceInput.jsx";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -461,14 +462,24 @@ function SummaryDisplay({ summary, category, onContinueChat }) {
               
               {/* Chat Input Form */}
               <form onSubmit={handleChatSubmit}>
-                <input
-                  type="text"
-                  className="chat-input"
-                  placeholder="Ask a follow-up question..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  disabled={chatLoading}
-                />
+                <div className="chat-input-with-voice">
+                  <input
+                    type="text"
+                    className="chat-input"
+                    placeholder="Ask a follow-up question..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    disabled={chatLoading}
+                  />
+                  <div className="voice-input-wrapper">
+                    <VoiceInput 
+                      onTranscript={(text) => {
+                        // Append the voice transcript to existing text
+                        setChatInput(prev => prev + text);
+                      }}
+                    />
+                  </div>
+                </div>
                 <button 
                   type="submit" 
                   className="chat-submit-btn"
