@@ -1,5 +1,38 @@
 # Air-Quality-Checker
 
+## Project Description
+
+Air Quality Checker is a comprehensive web application designed to monitor and predict air quality in real-time. Built for the NASA Space Apps Challenge, this project provides users with accurate air quality data and predictions to help them make informed decisions about their health and outdoor activities.
+
+### Key Features
+
+- **Real-time Air Quality Monitoring**: Track current air quality conditions based on your location
+- **AQI Predictions**: Machine learning-powered predictions for future air quality levels
+- **Geospatial Analysis**: Utilizes PostGIS for accurate location-based air quality queries
+- **Interactive Dashboard**: Visual representation of air quality data with charts and color-coded indicators
+- **Voice Accessibility**: Text-to-speech and voice input features for enhanced accessibility
+- **Historical Data**: View and analyze historical air quality trends
+- **Multi-language Support**: Available in English, Tamil, and Hindi
+- **Responsive Design**: Optimized for both desktop and mobile devices
+
+### Technology Stack
+
+**Frontend:**
+- React with Vite for fast, modern UI development
+- Chart.js for data visualization
+- Geolocation API for automatic location detection
+- Accessibility features including TTS and voice input
+
+**Backend:**
+- Django 5 REST API
+- GeoDjango with PostGIS for geospatial queries
+- PostgreSQL database with PostGIS extension
+- Machine learning model for AQI predictions (TensorFlow/Keras)
+
+**Data:**
+- Air quality measurements including PM2.5, PM10, NO2, SO2, CO, and O3
+- Location-based data with latitude/longitude and geometry points
+
 ## Overview
 
 Backend is Django 5 with a REST API, frontend is Vite + React. The backend now supports PostGIS for geospatial queries using GeoDjango.
