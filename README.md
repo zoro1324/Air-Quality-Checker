@@ -1,8 +1,8 @@
-# Air-Quality-Checker
+# Aero Gaurdian
 
 ## Project Description
 
-Air Quality Checker is a comprehensive web application designed to monitor and predict air quality in real-time. Built for the NASA Space Apps Challenge, this project provides users with accurate air quality data and predictions to help them make informed decisions about their health and outdoor activities.
+Aero Gaurdian is a comprehensive web application designed to monitor and predict air quality in real-time. Built for the NASA Space Apps Challenge, this project provides users with accurate air quality data and predictions to help them make informed decisions about their health and outdoor activities.
 
 ### Key Features
 
